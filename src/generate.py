@@ -4,6 +4,14 @@ from datetime import date, datetime, timedelta
 
 from src.models import Method, PaymentStatus, Payment
 
+from collections import defaultdict
+
+from src.models import Settlement
+from src.fees import total_deduction_paise
+
+SETTLEMENT_LAG_DAYS = 2
+
+
 SEED = 42
 START_DATE = date(2026, 7, 1)
 DAYS = 30
@@ -85,7 +93,63 @@ def write_payments_csv(payments: list[Payment], path: str) -> None:
             )
 
 
+#Settlement
+
+def build_settlements(payments: list[Payment]) -> list[Settlement]:
+    """Group payments by capture date and settle each batch T+2."""
+    by_date = defaultdict(list)
+    for p in payments:
+        by_date[p.captured_at.date()].append(p)
+
+    settlements = []
+    counter = 1
+
+    for capture_date in sorted(by_date):
+        batch = [p for p in by_date[capture_date] if p.status == PaymentStatus.CAPTURED]
+
+        gross = sum(p.amount_paise for p in batch)
+        deductions = sum(
+            total_deduction_paise(p.amount_paise, p.method) for p in batch
+        )
+        net = gross - deductions
+
+        settled_on = capture_date + timedelta(days=SETTLEMENT_LAG_DAYS)
+        settled_at = datetime(
+            settled_on.year, settled_on.month, settled_on.day, 11, 0, 0
+        )
+
+        settlements.append(
+            Settlement(
+                settlement_id=f"SETL_{counter:03d}",
+                utr=f"HDFC{settled_on.strftime('%Y%m%d')}01",
+                net_amount_paise=net,
+                settled_at=settled_at,
+            )
+        )
+        counter += 1
+
+    return settlements
+
+def write_settlements_csv(settlements: list[Settlement], path: str) -> None:
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["settlement_id", "utr", "net_amount_paise", "settled_at"])
+        for s in settlements:
+            writer.writerow(
+                [
+                    s.settlement_id,
+                    s.utr,
+                    s.net_amount_paise,
+                    s.settled_at.isoformat(),
+                ]
+            )
+
+
 if __name__ == "__main__":
     payments = generate_payments()
     write_payments_csv(payments, "data/payments.csv")
     print(f"wrote {len(payments)} payments")
+
+    settlements = build_settlements(payments)
+    write_settlements_csv(settlements, "data/settlements.csv")
+    print(f"wrote {len(settlements)} settlements")
