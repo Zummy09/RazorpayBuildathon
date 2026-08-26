@@ -6,4 +6,5 @@ env/
 .env
 .DS_Store
 .pytest_cache/
+scratch.py
 *.egg-info/
