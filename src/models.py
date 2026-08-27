@@ -1,5 +1,6 @@
 from enum import Enum
 from datetime import datetime
+from datetime import date
 from pydantic import BaseModel, Field
 
 #Payments
@@ -40,3 +41,19 @@ class Settlement(BaseModel):
     utr: str
     net_amount_paise: int
     settled_at: datetime
+
+
+class ReconStatus(str, Enum):
+    MATCHED = "matched"
+    EXCEPTION = "exception"
+
+
+class ReconResult(BaseModel):
+    settlement_id: str
+    settled_on: date
+    expected_paise: int
+    actual_paise: int
+    gap_paise: int
+    status: ReconStatus
+    payment_ids: list[str]
+    refund_ids: list[str]

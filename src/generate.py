@@ -28,7 +28,7 @@ SETTLEMENT_LAG_DAYS = 2
 NORMAL_REFUND_COUNT = 60
 OLD_CYCLE_REFUND_COUNT = 10
 OLD_CYCLE_LAG_RANGE = (15, 25)
-NORMAL_REFUND_LAG_RANGE = (1, 2)
+NORMAL_REFUND_LAG_RANGE = (2, 2)
 PARTIAL_REFUND_MIN_FRACTION = 0.3
 
 
@@ -209,7 +209,7 @@ def generate_refunds(payments: list[Payment]) -> tuple[list[Refund], list[dict]]
     # normal refunds, settled close to the original payment
     old_cycle_ids = {p.payment_id for p in old_cycle_targets}
     remaining = [p for p in captured if p.payment_id not in old_cycle_ids]
-    
+
     for p in random.sample(remaining, NORMAL_REFUND_COUNT):
         lag = random.randint(*NORMAL_REFUND_LAG_RANGE)
         refund_date = p.captured_at.date() + timedelta(days=lag)
