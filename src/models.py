@@ -57,3 +57,30 @@ class ReconResult(BaseModel):
     status: ReconStatus
     payment_ids: list[str]
     refund_ids: list[str]
+
+
+class Cause(str, Enum):
+    OLD_CYCLE_REFUND = "old_cycle_refund"
+    ROUNDING = "rounding"
+    UNKNOWN = "unknown"
+
+
+class ExceptionVerdict(BaseModel):
+    cause: Cause
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str
+    evidence_refund_ids: list[str] = []
+    suggested_action: str
+
+class Cause(str, Enum):
+    OLD_CYCLE_REFUND = "old_cycle_refund"
+    ROUNDING = "rounding"
+    UNKNOWN = "unknown"
+
+
+class ExceptionVerdict(BaseModel):
+    cause: Cause
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str
+    evidence_refund_ids: list[str] = []
+    suggested_action: str

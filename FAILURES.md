@@ -95,3 +95,33 @@ until metrics exist to tune the window against.
 **Cost**
 ~45 min. The oversized gaps were the tell — a gap can never exceed the
 largest single payment unless multiple items are being missed.
+
+
+## F-05 — Model endpoint retired mid-build
+
+**Symptom**
+Every classification returned cause=unknown, confidence=0.0. No crash,
+no stack trace — the batch completed and the failures appeared on the
+exception list.
+
+**Root cause**
+404 NOT_FOUND: gemini-2.0-flash was retired. The model identifier was
+hardcoded from documentation that had since moved on.
+
+**What I tried**
+Nothing — the error was already in the verdict's reasoning field,
+because the fallback path records the underlying exception rather than
+discarding it.
+
+**Fix**
+Updated the model identifier. Model choice is a single constant in
+classifier.py, so provider or version changes are a one-line edit.
+
+**What this proved**
+The retry-then-degrade path works under a real failure that was not
+injected deliberately. A total API outage costs the run its
+classifications but not its results — every unclassified gap surfaces
+as an honest exception rather than a crash.
+
+**Cost**
+~5 min to fix. Worth more as evidence than it cost.
