@@ -84,3 +84,20 @@ class ExceptionVerdict(BaseModel):
     reasoning: str
     evidence_refund_ids: list[str] = []
     suggested_action: str
+
+class Route(str, Enum):
+    AUTO_RESOLVED = "auto_resolved"
+    ESCALATED = "escalated"
+    UNRESOLVABLE = "unresolvable"
+
+
+class ExceptionRecord(BaseModel):
+    settlement_id: str
+    settled_on: date
+    gap_paise: int
+    route: Route
+    cause: Cause
+    confidence: float
+    evidence_refund_ids: list[str]
+    reasoning: str
+    resolved_by: str

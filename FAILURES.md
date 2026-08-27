@@ -125,3 +125,31 @@ as an honest exception rather than a crash.
 
 **Cost**
 ~5 min to fix. Worth more as evidence than it cost.
+
+
+## F-06 — Pipeline ran against stale CSVs
+
+**Symptom**
+The in-memory run produced 9 exceptions. Running the same logic
+against data/*.csv produced 20, with several settlements reporting
+zero candidate refunds despite large gaps.
+
+**Root cause**
+The CSV files on disk were written before the F-04 fix to refund
+lag. The generator and the committed data had drifted apart, so the
+pipeline was reconciling a dataset that no longer matched the code
+that produced it.
+
+**What I tried**
+Read the zero-candidate settlements as an evidence-builder bug.
+Compared record counts between the disk load and an in-memory
+generation and found the refund count differed.
+
+**Fix**
+Regenerated the data. README now states that generate must run before
+pipeline, and the two are separate commands by design — the pipeline
+consumes data as an external input rather than producing it.
+
+**Cost**
+~20 min. The tell was 20 exceptions, the same count as the F-04
+symptom — the old data still carried the old bug.
