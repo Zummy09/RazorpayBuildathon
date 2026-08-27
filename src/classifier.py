@@ -15,6 +15,9 @@ from pydantic import ValidationError
 
 from src.models import Cause, ExceptionVerdict
 
+import hashlib
+from pathlib import Path
+
 load_dotenv()
 
 MODEL = "gemini-3.6-flash"
@@ -79,7 +82,7 @@ def _build_prompt(evidence: dict, strict: bool = False) -> str:
     return "\n".join(parts)
 
 
-def classify(evidence: dict) -> ExceptionVerdict:
+def _call_model(evidence: dict) -> ExceptionVerdict:
     """Return a verdict for one gap. Never raises -- failures become
     an unknown verdict so a bad response cannot kill the batch."""
     last_error = None
@@ -110,3 +113,32 @@ def classify(evidence: dict) -> ExceptionVerdict:
         evidence_refund_ids=[],
         suggested_action="Escalate to a human reviewer.",
     )
+
+CACHE_DIR = Path(".cache/verdicts")
+
+
+def _cache_key(evidence: dict) -> str:
+    """A short stable id for this exact evidence package."""
+    blob = json.dumps(evidence, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def classify(evidence: dict, use_cache: bool = True) -> ExceptionVerdict:
+    """Classify a gap, reusing a saved verdict when the evidence is identical.
+
+    Safe because the model runs at temperature 0 -- the same evidence
+    always produces the same verdict.
+    """
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = CACHE_DIR / f"{_cache_key(evidence)}.json"
+
+    if use_cache and path.exists():
+        return ExceptionVerdict.model_validate_json(path.read_text())
+
+    verdict = _call_model(evidence)
+
+    # never cache a failure -- a quota error would be frozen forever
+    if verdict.confidence > 0:
+        path.write_text(verdict.model_dump_json(indent=2))
+
+    return verdict

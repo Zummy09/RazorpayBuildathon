@@ -7,4 +7,5 @@ env/
 .DS_Store
 .pytest_cache/
 scratch.py
+.cache/
 *.egg-info/
