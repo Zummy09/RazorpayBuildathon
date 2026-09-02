@@ -8,6 +8,23 @@ Typos and environment setup are not failures.
 
 ---
 
+
+| ID | Failure | Category |
+|---|---|---|
+| F-01 | Settlements inflated by failed payments | Data correctness |
+| F-02 | Set membership on unhashable Pydantic objects | Language |
+| F-03 | Reconciler replayed the generator's own logic | Design |
+| F-04 | Normal refunds misclassified as exceptions | Data consistency |
+| F-05 | Model endpoint retired mid-build | External |
+| F-06 | Pipeline ran against stale CSVs | Environment |
+| F-07 | Contradicting rule cancelled a prompt definition | Prompt |
+| F-08 | Duplicate class definitions shadowing an enum | Code hygiene |
+| F-09 | Encoding crash, then a poisoned cache | Platform |
+| F-10 | Error handling masked a code bug as an API failure | Design |
+
+
+---
+
 ## F-01 — Settlements inflated by failed payments
 
 **Symptom**
@@ -179,106 +196,148 @@ would have looked like model uncertainty rather than a contradiction in
 the prompt. Capturing free-text reasoning alongside a structured verdict
 is what made it diagnosable.
 
-## F-07 — Model could not return a cause that was not in the schema
+---
+
+## F-07 — Model would not emit a label the prompt had defined
 
 **Symptom**
-Chargeback settlements returned cause=unknown while the reasoning field
-explicitly named a chargeback. Two rounds of prompt revision raised
-confidence from 0.1 to 0.85 but never changed the label.
-
-**Root cause**
-CHARGEBACK was added to the prompt but never to the Cause enum. Since
-the classifier uses structured output, the enum is sent to the model as
-a schema constraint — the model was physically unable to emit a value
-the schema did not permit, and correctly fell back to unknown.
+Chargeback settlements returned `cause=unknown` while the reasoning
+field explicitly named a chargeback. Four prompt revisions raised
+confidence from 0.1 to 0.8; the label never changed.
 
 **What I tried**
-Assumed the prompt was ambiguous and revised it twice, reordering the
-cause list and adding explicit instructions. Both were wrong. The model
-eventually stated the reason itself: "the schema constraints restrict
-cause to old_cycle_refund, rounding, or unknown."
+Revised the chargeback definition. Reordered the cause list. Added
+explicit instructions that unconfirmability was not grounds for
+abstaining. Each attempt cost an API call and each appeared to fail.
+
+Then added a string assertion on the assembled prompt rather than
+assuming the edits had landed:
+
+    print("bad rule removed:", "low confidence or unknown" not in SYSTEM_PROMPT)
+
+It printed `False`. A general rule further down the prompt still read
+"a gap you cannot attribute is low confidence or unknown" — directly
+contradicting the chargeback definition forty lines above it. The rules
+section came last, so it won.
 
 **Fix**
-Added CHARGEBACK to the enum. The prompt was already correct.
+Removed the contradicting sentence.
 
 **What this showed**
-Structured output is a hard constraint, not a suggestion — which is why
-it is worth using, and why the prompt and the schema must be changed
-together. The free-text reasoning field is what made this diagnosable:
-without it, this would have looked like model uncertainty rather than a
-schema mismatch, and I would have kept editing the prompt.
+Later instructions override earlier ones. A specific definition can be
+cancelled by a general rule the model reads afterwards. And asserting on
+the assembled prompt costs nothing, while assuming an edit landed cost
+two API calls.
 
 **Cost**
-~60 min across two wrong prompt revisions.
+~1 hour, 4 API calls.
 
-**Second cause found**
-After fixing the enum, the model still returned unknown. The CAUSES
-section stated three times that unconfirmability is not grounds for
-abstaining, but a general rule further down the prompt read "a gap you
-cannot attribute is low confidence or unknown." The model followed the
-later, more general instruction. Contradictions between a specific
-definition and a general rule resolve in favour of whatever the model
-reads last.
+---
 
-**Third round**
-Two prompt revisions appeared to have no effect. A string check on the
-assembled prompt showed the contradicting rule had never been removed —
-the fix had been added alongside it rather than replacing it. Asserting
-on the prompt text costs nothing and would have caught this two API
-calls earlier.
-
-
-## F-08 — Two copies of the project, edits landing in the wrong one
+## F-08 — Duplicate class definitions shadowing the enum
 
 **Symptom**
-Four prompt revisions failed to make the classifier return `chargeback`.
-The model's own reasoning said the schema only permitted three causes,
-yet a direct check on the enum printed four.
-
-**Root cause**
-Two copies of the project existed — one on C:\Users\Admin\Desktop and
-one on D:\. The venv resolved to D:, so imports loaded a stale
-`models.py` without CHARGEBACK. Edits were being made in one tree and
-executed from another.
+After F-07, the model still would not return `chargeback`. Its very
+first response had said: "the schema constraints restrict cause to
+old_cycle_refund, rounding, or unknown." Printing `Cause` showed four
+values including `chargeback`.
 
 **What I tried**
-Assumed prompt ambiguity and revised the prompt four times, spending
-several API calls. Added a string assertion on the prompt, which found
-one real bug but not this one. Only a Pydantic ValidationError — raised
-by the deterministic path, which does not go near the model — exposed
-that the enum being validated against was not the enum on disk.
+Suspected a stale bytecode cache — cleared `__pycache__`, no change.
+Suspected two project trees, since a second copy existed on another
+drive — checked `src.models.__file__`, it resolved correctly. Checked
+whether `Cause` was the same object in both modules — it was.
 
-**Fix**
-Removed the duplicate tree and confirmed `src.models.__file__` resolves
-to the working copy.
+The break came from a `ValidationError` on the deterministic
+chargeback path, which never touches the model:
 
-**What this showed**
-The model was reporting the truth the entire time. "The schema
-restricts cause to three values" was accurate — I assumed it was
-hedging. Printing a value proves what a name holds; printing
-`module.__file__` proves which file that name came from.
+    Input should be 'old_cycle_refund', 'rounding' or 'unknown'
+    input_value=<Cause.CHARGEBACK: 'chargeback'>
 
-**Cost**
-~4 hours and roughly 8 API calls chasing a prompt problem that was an
-environment problem.
-
-## F-09 — Cache write crashed on a rupee symbol
-
-**Symptom**
-UnicodeEncodeError mid-run: 'charmap' codec can't encode '\u20b9'. The
-classification had succeeded; the crash was writing the verdict to cache.
+Pydantic was rejecting a value from the same enum it was validating
+against.
 
 **Root cause**
-Windows defaults file encoding to cp1252, which has no rupee symbol. The
-model included one in its reasoning text.
+`models.py` contained three `class Cause` and two `class
+ExceptionVerdict` definitions, accumulated by pasting new code alongside
+old rather than replacing it. Python binds the last definition to the
+name, so `print(Cause)` showed four values — but `ExceptionVerdict` had
+captured whichever `Cause` existed at its own definition point, which
+had three.
 
 **Fix**
-Explicit encoding="utf-8" on every file read and write.
+Deduplicated `models.py` to one definition per class, ordered so `Cause`
+precedes `ExceptionVerdict`.
 
 **What this showed**
-The default would not have failed on Linux or macOS, so this was a
-platform-specific crash that a reviewer running the repo elsewhere would
-never see — and I would never have seen a bug they hit.
+The model reported the fault accurately in its first response and it was
+read as hedging. Printing a name shows the last binding, not the binding
+a class captured when it was defined — so the check that felt conclusive
+was the one that misled me. `model_json_schema()` would have shown the
+truth immediately.
 
 **Cost**
-~10 min, plus the API calls lost from the aborted run.
+~4 hours, ~8 API calls, on a prompt problem that was a file hygiene
+problem.
+
+---
+
+## F-09 — Cache write crashed on a rupee symbol, then poisoned itself
+
+**Symptom**
+`UnicodeEncodeError: 'charmap' codec can't encode character '\u20b9'`
+mid-run. The classification had succeeded; the crash was writing the
+verdict to cache.
+
+On the next run, a different error: `Invalid JSON: EOF while parsing`.
+
+**Root cause**
+Two faults in sequence. Windows defaults file encoding to cp1252, which
+has no rupee symbol, and the model had included one in its reasoning.
+Then the crash left a zero-byte cache file behind, which the next run
+tried to parse and died on.
+
+**Fix**
+Explicit `encoding="utf-8"` on every file read and write. The cache read
+is now wrapped so a corrupt entry is deleted and refetched rather than
+raising.
+
+**What this showed**
+The default would not have failed on Linux or macOS — this was a
+platform-specific crash a reviewer running the repo elsewhere would
+never hit, and one I would never have seen from their environment
+either. And a cache that can crash the pipeline it exists to speed up is
+worse than no cache.
+
+**Cost**
+~30 min plus the API calls lost from two aborted runs.
+
+---
+
+## F-10 — Error handling masked a code bug as an API failure
+
+**Symptom**
+Three settlements reported `api call failed: module 'ntpath' has no
+attribute 'read_text'`. Read as an SDK or environment problem.
+
+**Root cause**
+Two unused imports — `from os import path` and `import os.path as path`
+— shadowed the local `path` variable in the cache logic. The resulting
+`NameError` was caught by the classifier's broad `except Exception` and
+reported as an API failure.
+
+Separately, an edit intended for `classify()` had been pasted into
+`_call_model()`, replacing the response parsing with a cache read.
+
+**Fix**
+Removed the unused imports and restored the response parsing.
+
+**What this showed**
+The broad exception handler is what keeps one bad classification from
+killing a batch, and it is also what disguised a `NameError` as a
+network error. The trade-off is real. What made it recoverable was
+preserving the exception text in the verdict's reasoning field — a
+structured verdict alone would have shown only `cause=unknown`.
+
+**Cost**
+~30 min.
