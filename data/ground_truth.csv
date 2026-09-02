@@ -9,3 +9,9 @@ settled_on,cause,gap_paise,caused_by,original_payment
 2026-07-28,old_cycle_refund,1345305,RFD_0008,PAY_00322
 2026-07-25,old_cycle_refund,1349065,RFD_0009,PAY_00197
 2026-07-26,old_cycle_refund,511072,RFD_0010,PAY_00455
+2026-07-17,chargeback,610918,CBK_001,PAY_00308
+2026-07-18,chargeback,518136,CBK_002,PAY_00305
+2026-07-30,chargeback,962290,CBK_003,PAY_00312
+2026-07-16,chargeback,455762,CBK_004,PAY_00156
+2026-07-29,chargeback,120252,CBK_005,PAY_00335
+2026-07-29,chargeback,1061712,CBK_006,PAY_00209

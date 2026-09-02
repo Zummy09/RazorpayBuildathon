@@ -72,6 +72,15 @@ def build_evidence(
                 pair_match = [a["refund_id"], b["refund_id"]]
                 break
 
+    # how much of the gap survives the best single candidate. a large
+    # remainder means part of the gap has no record in the merchant's data.
+    largest_candidate = max(
+        (c["amount_paise"] for c in candidates), default=0
+    )
+    remainder = gap - largest_candidate
+
+    total_candidates = sum(c["amount_paise"] for c in candidates)
+
     return {
         "settlement_id": result.settlement_id,
         "settled_on": settled_on.isoformat(),
@@ -85,4 +94,8 @@ def build_evidence(
         "candidate_refunds": candidates,
         "exact_match": exact_match,
         "pair_match": pair_match,
+        "largest_candidate_paise": largest_candidate,
+        "gap_remaining_after_largest_candidate": remainder,
+        "all_candidates_total_paise": total_candidates,
+        "gap_remaining_after_all_candidates": gap - total_candidates,
     }

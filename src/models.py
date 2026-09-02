@@ -101,3 +101,16 @@ class ExceptionRecord(BaseModel):
     evidence_refund_ids: list[str]
     reasoning: str
     resolved_by: str
+
+
+class Cause(str, Enum):
+    OLD_CYCLE_REFUND = "old_cycle_refund"
+    CHARGEBACK = "chargeback"          # new
+    ROUNDING = "rounding"
+    UNKNOWN = "unknown"
+
+class Chargeback(BaseModel):
+    chargeback_id: str
+    payment_id: str
+    amount_paise: int = Field(gt=0)
+    raised_at: datetime

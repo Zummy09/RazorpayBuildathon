@@ -153,3 +153,28 @@ consumes data as an external input rather than producing it.
 **Cost**
 ~20 min. The tell was 20 exceptions, the same count as the F-04
 symptom — the old data still carried the old bug.
+
+## F-07 — Model identified chargebacks but refused to label them
+
+**Symptom**
+Three settlements returned cause=unknown while the reasoning field
+explicitly said "indicates a customer bank chargeback." Confidence rose
+from 0.1-0.3 to 0.85 after a prompt revision, but the cause field did
+not change.
+
+**Root cause**
+The prompt defined chargebacks as identifiable by the absence of refund
+evidence, while also instructing the model to return unknown when it
+could not confirm a cause from the data. For a chargeback these are the
+same condition -- unconfirmability from merchant records is the
+defining feature, not a reason to abstain.
+
+**Fix**
+Stated explicitly that unconfirmability is not grounds for unknown, and
+reordered the cause list so chargeback is read last.
+
+**What this showed**
+The reasoning field was worth more than the label. Without it, this
+would have looked like model uncertainty rather than a contradiction in
+the prompt. Capturing free-text reasoning alongside a structured verdict
+is what made it diagnosable.

@@ -2,8 +2,9 @@ import csv
 import random
 from datetime import date, datetime, timedelta
 
-from src.models import Method, PaymentStatus, Payment, Refund, Settlement
-
+from src.models import (
+    Method, PaymentStatus, Payment, Refund, Settlement, Chargeback
+)
 from collections import defaultdict
 
 from src.fees import total_deduction_paise
@@ -30,6 +31,9 @@ OLD_CYCLE_REFUND_COUNT = 10
 OLD_CYCLE_LAG_RANGE = (15, 25)
 NORMAL_REFUND_LAG_RANGE = (2, 2)
 PARTIAL_REFUND_MIN_FRACTION = 0.3
+
+CHARGEBACK_COUNT = 6
+CHARGEBACK_LAG_RANGE = (10, 25)
 
 
 def _txn_count_for(day: date) -> int:
@@ -102,7 +106,9 @@ def write_payments_csv(payments: list[Payment], path: str) -> None:
 #Settlement
 
 def build_settlements(
-    payments: list[Payment], refunds: list[Refund]
+    payments: list[Payment],
+    refunds: list[Refund],
+    chargebacks: list[Chargeback],
 ) -> list[Settlement]:
     by_date = defaultdict(list)
     for p in payments:
@@ -112,6 +118,10 @@ def build_settlements(
     refunds_by_date = defaultdict(int)
     for r in refunds:
         refunds_by_date[r.created_at.date()] += r.amount_paise
+
+    cb_by_date = defaultdict(int)
+    for cb in chargebacks:
+        cb_by_date[cb.raised_at.date()] += cb.amount_paise
 
     settlements = []
     counter = 1
@@ -126,8 +136,9 @@ def build_settlements(
 
         settled_on = capture_date + timedelta(days=SETTLEMENT_LAG_DAYS)
         refunded = refunds_by_date.get(settled_on, 0)
+        charged_back = cb_by_date.get(settled_on, 0)
 
-        net = gross - deductions - refunded
+        net = gross - deductions - refunded - charged_back
 
         settled_at = datetime(
             settled_on.year, settled_on.month, settled_on.day, 11, 0, 0
@@ -259,17 +270,70 @@ def write_ground_truth_csv(rows: list[dict], path: str) -> None:
         writer.writeheader()
         writer.writerows(rows)
 
+def generate_chargebacks(
+    payments: list[Payment], exclude_ids: set[str]
+) -> tuple[list[Chargeback], list[dict]]:
+    """Bank-initiated reversals. Deducted from settlements but never
+    recorded in the merchant's own books -- that is what makes them
+    unexplainable from the merchant's data alone."""
+    captured = [
+        p
+        for p in payments
+        if p.status == PaymentStatus.CAPTURED
+        and p.payment_id not in exclude_ids
+        and p.captured_at.date() < START_DATE + timedelta(days=12)
+    ]
+    last_day = START_DATE + timedelta(days=DAYS - 1)
+
+    chargebacks = []
+    ground_truth = []
+
+    for i, p in enumerate(random.sample(captured, CHARGEBACK_COUNT), start=1):
+        lag = random.randint(*CHARGEBACK_LAG_RANGE)
+        raised_on = p.captured_at.date() + timedelta(days=lag)
+        if raised_on > last_day:
+            raised_on = last_day
+
+        cb_id = f"CBK_{i:03d}"
+        chargebacks.append(
+            Chargeback(
+                chargeback_id=cb_id,
+                payment_id=p.payment_id,
+                amount_paise=p.amount_paise,
+                raised_at=datetime(
+                    raised_on.year, raised_on.month, raised_on.day, 14, 0, 0
+                ),
+            )
+        )
+        ground_truth.append(
+            {
+                "settled_on": raised_on.isoformat(),
+                "cause": "chargeback",
+                "gap_paise": p.amount_paise,
+                "caused_by": cb_id,
+                "original_payment": p.payment_id,
+            }
+        )
+
+    return chargebacks, ground_truth
+
+
 if __name__ == "__main__":
     payments = generate_payments()
-    refunds, truth = generate_refunds(payments)
-    settlements = build_settlements(payments, refunds)
+    refunds, refund_truth = generate_refunds(payments)
+
+    used = {r.payment_id for r in refunds}
+    chargebacks, cb_truth = generate_chargebacks(payments, used)
+
+    settlements = build_settlements(payments, refunds, chargebacks)
 
     write_payments_csv(payments, "data/payments.csv")
     write_refunds_csv(refunds, "data/refunds.csv")
     write_settlements_csv(settlements, "data/settlements.csv")
-    write_ground_truth_csv(truth, "data/ground_truth.csv")
+    write_ground_truth_csv(refund_truth + cb_truth, "data/ground_truth.csv")
 
-    print(f"payments     {len(payments)}")
-    print(f"refunds      {len(refunds)}")
-    print(f"settlements  {len(settlements)}")
-    print(f"ground truth {len(truth)}")
+    print(f"payments      {len(payments)}")
+    print(f"refunds       {len(refunds)}")
+    print(f"chargebacks   {len(chargebacks)}")
+    print(f"settlements   {len(settlements)}")
+    print(f"ground truth  {len(refund_truth) + len(cb_truth)}")
