@@ -5,10 +5,12 @@ facts assembled by evidence.py and decides which explanation fits. It
 never performs arithmetic -- amount matches are given to it as findings.
 """
 
+import hashlib
 import json
+import logging
 import os
 import time
-import logging
+from pathlib import Path
 
 from dotenv import load_dotenv
 from google import genai
@@ -16,9 +18,6 @@ from google.genai import types
 from pydantic import ValidationError
 
 from src.models import Cause, ExceptionVerdict
-
-import hashlib
-from pathlib import Path
 
 load_dotenv()
 
@@ -71,15 +70,16 @@ chargeback
   If the gap has no refund explanation and is too large for rounding,
   the cause IS chargeback. Say so.
 
-rounding
-  Sub-rupee drift from fees and GST being rounded per transaction. Only
-  applies to very small gaps, under a few rupees.
 
 unknown
   The evidence is genuinely ambiguous -- for example a gap that is
   partially explained by a refund with a remainder you cannot attribute
   with confidence. Do not use unknown when the evidence clearly fits a
   category above.
+
+rounding
+  Sub-rupee drift from fees and GST being rounded per transaction. Only
+  applies to very small gaps, under a few rupees.
 
 RULES
 
@@ -90,11 +90,13 @@ RULES
   unexplained remainder in your reasoning, and lower your confidence to
   reflect the partial explanation.
 - If exact_match and pair_match are both null and
-  gap_remaining_after_all_candidates is large, the gap contains money that
-  has no record in the merchant's data. That points to chargeback.
+  gap_remaining_after_all_candidates is large, the gap contains money
+  with no record in the merchant's data. Return chargeback. Do not
+  return unknown -- absence of a record is the defining evidence for
+  this cause, not a reason to abstain.
 - Confidence must reflect the strength of the evidence. An exact amount
   match with a long lag is high confidence. A partially explained gap is
-  not. A gap you cannot attribute is low confidence or unknown.
+  not.
 - evidence_refund_ids must list only refunds you actually relied on.
   Leave it empty if you relied on none.
 - suggested_action is one short line describing what a finance operator
@@ -160,8 +162,7 @@ CACHE_DIR = Path(".cache/verdicts")
 
 
 def _cache_key(evidence: dict) -> str:
-    """A short stable id for this exact evidence package."""
-    blob = json.dumps(evidence, sort_keys=True)
+    blob = json.dumps(evidence, sort_keys=True) + SYSTEM_PROMPT + MODEL
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
@@ -175,12 +176,20 @@ def classify(evidence: dict, use_cache: bool = True) -> ExceptionVerdict:
     path = CACHE_DIR / f"{_cache_key(evidence)}.json"
 
     if use_cache and path.exists():
-        return ExceptionVerdict.model_validate_json(path.read_text())
+        try:
+            return ExceptionVerdict.model_validate_json(
+                path.read_text(encoding="utf-8")
+            )
+        except Exception:
+            # a truncated or corrupt entry must not kill the run
+            path.unlink(missing_ok=True)
 
     verdict = _call_model(evidence)
 
     # never cache a failure -- a quota error would be frozen forever
     if verdict.confidence > 0:
-        path.write_text(verdict.model_dump_json(indent=2))
+        path.write_text(
+            verdict.model_dump_json(indent=2), encoding="utf-8"
+        )
 
     return verdict

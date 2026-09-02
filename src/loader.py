@@ -11,7 +11,7 @@ from src.models import Payment, Refund, Settlement
 
 def _load(path: str, model) -> tuple[list, list[dict]]:
     good, bad = [], []
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8") as f:
         for i, row in enumerate(csv.DictReader(f), start=2):
             try:
                 good.append(model(**row))

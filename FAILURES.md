@@ -178,3 +178,107 @@ The reasoning field was worth more than the label. Without it, this
 would have looked like model uncertainty rather than a contradiction in
 the prompt. Capturing free-text reasoning alongside a structured verdict
 is what made it diagnosable.
+
+## F-07 — Model could not return a cause that was not in the schema
+
+**Symptom**
+Chargeback settlements returned cause=unknown while the reasoning field
+explicitly named a chargeback. Two rounds of prompt revision raised
+confidence from 0.1 to 0.85 but never changed the label.
+
+**Root cause**
+CHARGEBACK was added to the prompt but never to the Cause enum. Since
+the classifier uses structured output, the enum is sent to the model as
+a schema constraint — the model was physically unable to emit a value
+the schema did not permit, and correctly fell back to unknown.
+
+**What I tried**
+Assumed the prompt was ambiguous and revised it twice, reordering the
+cause list and adding explicit instructions. Both were wrong. The model
+eventually stated the reason itself: "the schema constraints restrict
+cause to old_cycle_refund, rounding, or unknown."
+
+**Fix**
+Added CHARGEBACK to the enum. The prompt was already correct.
+
+**What this showed**
+Structured output is a hard constraint, not a suggestion — which is why
+it is worth using, and why the prompt and the schema must be changed
+together. The free-text reasoning field is what made this diagnosable:
+without it, this would have looked like model uncertainty rather than a
+schema mismatch, and I would have kept editing the prompt.
+
+**Cost**
+~60 min across two wrong prompt revisions.
+
+**Second cause found**
+After fixing the enum, the model still returned unknown. The CAUSES
+section stated three times that unconfirmability is not grounds for
+abstaining, but a general rule further down the prompt read "a gap you
+cannot attribute is low confidence or unknown." The model followed the
+later, more general instruction. Contradictions between a specific
+definition and a general rule resolve in favour of whatever the model
+reads last.
+
+**Third round**
+Two prompt revisions appeared to have no effect. A string check on the
+assembled prompt showed the contradicting rule had never been removed —
+the fix had been added alongside it rather than replacing it. Asserting
+on the prompt text costs nothing and would have caught this two API
+calls earlier.
+
+
+## F-08 — Two copies of the project, edits landing in the wrong one
+
+**Symptom**
+Four prompt revisions failed to make the classifier return `chargeback`.
+The model's own reasoning said the schema only permitted three causes,
+yet a direct check on the enum printed four.
+
+**Root cause**
+Two copies of the project existed — one on C:\Users\Admin\Desktop and
+one on D:\. The venv resolved to D:, so imports loaded a stale
+`models.py` without CHARGEBACK. Edits were being made in one tree and
+executed from another.
+
+**What I tried**
+Assumed prompt ambiguity and revised the prompt four times, spending
+several API calls. Added a string assertion on the prompt, which found
+one real bug but not this one. Only a Pydantic ValidationError — raised
+by the deterministic path, which does not go near the model — exposed
+that the enum being validated against was not the enum on disk.
+
+**Fix**
+Removed the duplicate tree and confirmed `src.models.__file__` resolves
+to the working copy.
+
+**What this showed**
+The model was reporting the truth the entire time. "The schema
+restricts cause to three values" was accurate — I assumed it was
+hedging. Printing a value proves what a name holds; printing
+`module.__file__` proves which file that name came from.
+
+**Cost**
+~4 hours and roughly 8 API calls chasing a prompt problem that was an
+environment problem.
+
+## F-09 — Cache write crashed on a rupee symbol
+
+**Symptom**
+UnicodeEncodeError mid-run: 'charmap' codec can't encode '\u20b9'. The
+classification had succeeded; the crash was writing the verdict to cache.
+
+**Root cause**
+Windows defaults file encoding to cp1252, which has no rupee symbol. The
+model included one in its reasoning text.
+
+**Fix**
+Explicit encoding="utf-8" on every file read and write.
+
+**What this showed**
+The default would not have failed on Linux or macOS, so this was a
+platform-specific crash that a reviewer running the repo elsewhere would
+never see — and I would never have seen a bug they hit.
+
+**Cost**
+~10 min, plus the API calls lost from the aborted run.

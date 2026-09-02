@@ -3,44 +3,62 @@ from datetime import datetime
 from datetime import date
 from pydantic import BaseModel, Field
 
-#Payments
+# Payments
+
 
 class Method(str, Enum):
-    UPI ="upi"
+    UPI = "upi"
     CARD = "card"
-    NETBANKING ="netbanking"
+    NETBANKING = "netbanking"
 
 
 class PaymentStatus(str, Enum):
-    CAPTURED ="captured"
-    AUTHORIZED ="authorized"
-    FAILED ="failed"
+    CAPTURED = "captured"
+    AUTHORIZED = "authorized"
+    FAILED = "failed"
 
 
 class Payment(BaseModel):
-    payment_id:str
-    order_id:str
-    amount_paise:int = Field(gt=0)
-    method:Method
-    status:PaymentStatus
-    captured_at:datetime
+    payment_id: str
+    order_id: str
+    amount_paise: int = Field(gt=0)
+    method: Method
+    status: PaymentStatus
+    captured_at: datetime
 
-#Refunds
+
+# Refunds
 
 
 class Refund(BaseModel):
-    refund_id:str
-    payment_id:str
-    amount_paise: int =Field(gt=0)
-    created_at:datetime
+    refund_id: str
+    payment_id: str
+    amount_paise: int = Field(gt=0)
+    created_at: datetime
 
 
-#Settlements
+# Chargebacks -- bank-initiated reversals. never written to the merchant's
+# data files, which is what makes them unexplainable from those records.
+
+
+class Chargeback(BaseModel):
+    chargeback_id: str
+    payment_id: str
+    amount_paise: int = Field(gt=0)
+    raised_at: datetime
+
+
+# Settlements
+
+
 class Settlement(BaseModel):
     settlement_id: str
     utr: str
     net_amount_paise: int
     settled_at: datetime
+
+
+# Reconciliation
 
 
 class ReconStatus(str, Enum):
@@ -59,8 +77,12 @@ class ReconResult(BaseModel):
     refund_ids: list[str]
 
 
+# Classification
+
+
 class Cause(str, Enum):
     OLD_CYCLE_REFUND = "old_cycle_refund"
+    CHARGEBACK = "chargeback"
     ROUNDING = "rounding"
     UNKNOWN = "unknown"
 
@@ -72,18 +94,9 @@ class ExceptionVerdict(BaseModel):
     evidence_refund_ids: list[str] = []
     suggested_action: str
 
-class Cause(str, Enum):
-    OLD_CYCLE_REFUND = "old_cycle_refund"
-    ROUNDING = "rounding"
-    UNKNOWN = "unknown"
 
+# Routing
 
-class ExceptionVerdict(BaseModel):
-    cause: Cause
-    confidence: float = Field(ge=0.0, le=1.0)
-    reasoning: str
-    evidence_refund_ids: list[str] = []
-    suggested_action: str
 
 class Route(str, Enum):
     AUTO_RESOLVED = "auto_resolved"
@@ -101,16 +114,3 @@ class ExceptionRecord(BaseModel):
     evidence_refund_ids: list[str]
     reasoning: str
     resolved_by: str
-
-
-class Cause(str, Enum):
-    OLD_CYCLE_REFUND = "old_cycle_refund"
-    CHARGEBACK = "chargeback"          # new
-    ROUNDING = "rounding"
-    UNKNOWN = "unknown"
-
-class Chargeback(BaseModel):
-    chargeback_id: str
-    payment_id: str
-    amount_paise: int = Field(gt=0)
-    raised_at: datetime
