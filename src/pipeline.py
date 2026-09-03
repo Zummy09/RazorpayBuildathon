@@ -27,11 +27,11 @@ def route_verdict(verdict: ExceptionVerdict) -> Route:
 
 
 def resolve_deterministically(evidence: dict) -> ExceptionVerdict | None:
-    """A single candidate matching the gap exactly is not ambiguous.
-    Resolving it in code avoids a model call that could only agree."""
-   # no candidate refund covers this gap, alone or summed. the money has
+    """Cases where arithmetic already answers the question. Calling a model
+    to confirm a computed fact is waste, so these never reach it."""
+
+    # no candidate refund covers this gap, alone or summed. the money has
     # no record in the merchant's data, which is what a chargeback is.
-    # this is arithmetic, not judgment -- there is nothing to classify.
     if (
         evidence["exact_match"] is None
         and evidence["pair_match"] is None
@@ -49,6 +49,21 @@ def resolve_deterministically(evidence: dict) -> ExceptionVerdict | None:
             evidence_refund_ids=[],
             suggested_action="Request the chargeback report from the gateway.",
         )
+
+    # a single candidate matching the gap exactly is not ambiguous
+    if evidence["exact_match"] and len(evidence["candidate_refunds"]) == 1:
+        refund_id = evidence["exact_match"]
+        return ExceptionVerdict(
+            cause=Cause.OLD_CYCLE_REFUND,
+            confidence=1.0,
+            reasoning=(
+                f"Single candidate {refund_id} matches the gap exactly and "
+                f"its payment settled in an earlier cycle."
+            ),
+            evidence_refund_ids=[refund_id],
+            suggested_action=f"Post {refund_id} against this settlement.",
+        )
+
     return None
 
 

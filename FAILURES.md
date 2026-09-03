@@ -343,3 +343,34 @@ structured verdict alone would have shown only `cause=unknown`.
 
 **Cost**
 ~30 min.
+
+## F-11 — A deterministic path documented but not implemented
+
+**Symptom**
+`test_single_exact_match_resolves_without_the_model` failed:
+`resolve_deterministically` returned None for a single candidate with an
+exact amount match.
+
+**Root cause**
+The chargeback resolution block had been pasted over the exact-match
+block rather than alongside it. The function contained only one of the
+two rules it was supposed to hold.
+
+**What this cost before it was found**
+Every old-cycle refund was sent to the classifier. The last full run
+made 9 model calls for 12 exceptions; the correct figure is closer to 5.
+Both the README and the architecture document described a deterministic
+path for unambiguous matches that did not exist in the code.
+
+**Fix**
+Restored the exact-match block below the chargeback block.
+
+**What this showed**
+This was invisible in the output — every settlement still resolved with
+the right cause, just via an unnecessary API call. Only a test that
+asserted on *how* a verdict was reached caught it. The same paste-over-
+instead-of-edit mistake caused F-08.
+
+**Cost**
+~20 min to fix. Found by a test written two hours after the bug was
+introduced.
