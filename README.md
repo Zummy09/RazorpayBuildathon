@@ -83,9 +83,10 @@ as each problem is planted, and read only by the evaluator.
 
 | Route | Count | Value |
 |---|---|---|
-| Auto-resolved | 11 | Rs 1,13,681.78 |
+| Auto-resolved | 11 | Rs 98,170.76 |
 | Escalated for review | 0 | Rs 0.00 |
-| Unresolvable | 1 | Rs 10,882.80 |
+| Unresolvable | 1 | Rs 26,393.82 |
+
 
 ### How to read these numbers
 
@@ -110,6 +111,14 @@ the full gap to it, including on the settlement ground truth records as
 two chargebacks plus a refund. Coverage is therefore always 100% and the
 gate never fires. Permitting an answer is not the same as eliciting it.
 Recorded as F-12.
+
+**These numbers are from a single run.** The dataset is seeded and the
+deterministic stages are exact, so detection is stable across runs. The
+classifier's output is not perfectly reproducible even at temperature
+zero — an earlier run resolved the same twelve exceptions with a
+different settlement landing on the unresolvable list. Verdicts are
+cached on a hash of the evidence package, so a given run reproduces
+exactly once it exists, but a fresh run may differ.
 
 ## Architecture
 
