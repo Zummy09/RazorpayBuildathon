@@ -17,7 +17,7 @@ from google import genai
 from google.genai import types
 from pydantic import ValidationError
 
-from src.models import Cause, ExceptionVerdict
+from src.models import Cause, CauseAttribution, ExceptionVerdict
 
 load_dotenv()
 
@@ -85,20 +85,30 @@ RULES
 
 - Do not perform arithmetic. exact_match, pair_match, and the remainder
   figures are computed deterministically and given to you as facts.
-- A gap may have more than one cause. If a candidate refund explains only
-  part of it, report the cause with the strongest evidence, state the
-  unexplained remainder in your reasoning, and lower your confidence to
-  reflect the partial explanation.
+
+- A gap may have more than one cause. Return one entry in `causes` for
+  each, with the amount of the gap that cause accounts for. The amounts
+  should sum to the gap where you can account for all of it.
+
+- If you can only explain part of the gap, say so: list the cause you
+  can evidence with its amount, and add a second entry with cause
+  `unknown` for the remainder. Do not inflate one cause to cover the
+  whole gap.
+
 - If exact_match and pair_match are both null and
   gap_remaining_after_all_candidates is large, the gap contains money
-  with no record in the merchant's data. Return chargeback. Do not
-  return unknown -- absence of a record is the defining evidence for
-  this cause, not a reason to abstain.
-- Confidence must reflect the strength of the evidence. An exact amount
-  match with a long lag is high confidence. A partially explained gap is
-  not.
-- evidence_refund_ids must list only refunds you actually relied on.
-  Leave it empty if you relied on none.
+  with no record in the merchant's data. Return chargeback. Absence of
+  a record is the defining evidence for this cause, not a reason to
+  abstain.
+
+- Confidence describes how well the evidence supports your attribution,
+  not how much of the gap you covered. Coverage is computed separately
+  from the amounts you return.
+
+- evidence_refund_ids on each cause must list only refunds you relied on
+  for that specific cause. Chargebacks have no refund ids -- leave the
+  list empty.
+
 - suggested_action is one short line describing what a finance operator
   should do next.
 """
@@ -150,11 +160,16 @@ def _call_model(evidence: dict) -> ExceptionVerdict:
         except Exception as e:
             last_error = f"api call failed: {e}"
 
-    return ExceptionVerdict(
-        cause=Cause.UNKNOWN,
+        return ExceptionVerdict(
+        causes=[
+            CauseAttribution(
+                cause=Cause.UNKNOWN,
+                amount_paise=0,
+                evidence_refund_ids=[],
+            )
+        ],
         confidence=0.0,
         reasoning=f"Classification failed after {MAX_ATTEMPTS} attempts. {last_error}",
-        evidence_refund_ids=[],
         suggested_action="Escalate to a human reviewer.",
     )
 

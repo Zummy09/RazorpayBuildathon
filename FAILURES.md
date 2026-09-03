@@ -389,10 +389,10 @@ settlements.
 
 **Root cause**
 Prompt revisions made to fix chargeback labelling (F-07) also raised
-confidence on gaps with more than one cause. The verdict schema holds a
+confidence on gaps with more than one cause. The verdict schema held a
 single `cause` field, so a gap that is partly a refund and partly a
-chargeback cannot be represented — the model picks one and reports
-confidence in that pick rather than in how much of the gap it has
+chargeback could not be represented — the model picked one and reported
+confidence in that pick rather than in how much of the gap it had
 actually accounted for.
 
 **How it was found**
@@ -407,12 +407,40 @@ The confidence gate exists to catch exactly this and caught nothing —
 compensate for a schema that has no way to express a partial
 explanation.
 
-**What I would change**
-Replace the single `cause` field with a list of causes, each with an
-attributed amount. Confidence would then describe how much of the gap
-is accounted for rather than how certain the model is about one label.
-A gap only 60% explained would fall below the threshold on its own.
+**Fix**
+Replaced the single `cause` field with a list of `CauseAttribution`
+entries, each carrying an amount and its own evidence ids. Routing now
+computes coverage — attributed amount over gap — and escalates anything
+below 90% regardless of stated confidence.
+
+**Found while implementing**
+The first version of `attributed_paise` summed every cause including
+`unknown`, so a verdict explaining 60% and marking the remainder unknown
+scored as fully covered. The coverage check would have been decorative.
+An unknown remainder now contributes zero. Caught by
+`test_unknown_remainder_drags_coverage_down`, written before the
+implementation was run.
+
+**Outcome**
+The mechanism works — a verdict explaining 58% of a gap escalates at
+confidence 0.99, verified by test. The model does not use it. Across 8
+classifications it returned exactly one cause every time, attributing
+the full gap to it. On SETL_027, which ground truth records as two
+chargebacks plus an old-cycle refund, it attributed the entire
+Rs 26,393.82 to chargeback at 0.95 confidence.
+
+Coverage is therefore always 100% and the gate still never fires. The
+schema was the necessary fix but not the sufficient one: a model asked
+to explain a gap will explain all of it unless the prompt makes partial
+attribution the expected answer rather than a permitted one.
+
+**What I would try next**
+Require the model to state, as a separate field, how much of the gap it
+can evidence directly, before it names causes. Asking for the
+attribution and the confidence in the same response lets one absorb the
+other.
 
 **Status**
-Not fixed. Recorded as a known limitation in the architecture document
-and reflected in the results section of the README.
+Schema and routing implemented and covered by tests. The elicitation
+problem is open and recorded as a known limitation in the architecture
+document.

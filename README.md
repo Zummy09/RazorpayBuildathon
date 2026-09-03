@@ -12,12 +12,12 @@ Built for the Razorpay AI Buildathon 2026 — Track 4, AI Finance Controller.
 A gateway does not pay per order. It batches a day's transactions,
 subtracts what it is owed, and sends one bank credit:
 
-    Gross captured payments
-  − Platform fee and GST
-  − Refunds settled this cycle
-  − Chargebacks deducted
-  ──────────────────────────
-  = Net credit to the merchant
+      Gross captured payments
+    − Platform fee and GST
+    − Refunds settled this cycle
+    − Chargebacks deducted
+    ──────────────────────────
+    = Net credit to the merchant
 
 The merchant sees only the final number. Reconstructing the rest is the
 problem this system solves.
@@ -34,7 +34,7 @@ It does not tie cleanly, for real reasons:
 ## Quickstart
 
     git clone https://github.com/Zummy09/RazorpayBuildathon
-    cd settlement-reconciliation-agent
+    cd RazorpayBuildathon
     python -m venv .venv
     .venv\Scripts\activate          # Windows
     source .venv/bin/activate       # macOS / Linux
@@ -53,35 +53,63 @@ Generate the dataset, then run the reconciliation:
 input — the two are deliberately separate so the reconciler is never
 handed data it just produced.
 
+### Tests
+
+    pytest
+
+Twenty-four tests covering the deterministic core: fee and GST
+arithmetic, T+2 batch selection, exclusion of failed payments, the
+refund justification rule, candidate filtering, amount matching, and all
+routing branches. No API calls required — the components that handle
+money are verifiable without a model being available.
+
 ## Results
 
 Measured on a 30-day synthetic dataset: 1,380 payments, 67 refunds,
 6 chargebacks, 30 settlements. Ground truth is written by the generator
-at the moment each problem is planted, and is read only by the evaluator.
+as each problem is planted, and read only by the evaluator.
 
 | Metric | Value |
 |---|---|
 | Settlements processed | 30 |
-| Reconciled cleanly | TBD |
-| Exceptions raised | TBD |
-| Detection precision | TBD |
-| Detection recall | TBD |
-| Cause classified correctly | TBD |
-| Evidence cited correctly | TBD |
-| Model calls | TBD of TBD exceptions |
+| Reconciled cleanly | 18 (60%) |
+| Exceptions raised | 12 |
+| Exceptions in ground truth | 12 |
+| Detection precision | 1.00 |
+| Detection recall | 1.00 |
+| Model calls | 8 of 12 exceptions |
 
 ### Exception routing
 
 | Route | Count | Value |
 |---|---|---|
-| Auto-resolved | TBD | TBD |
-| Escalated for review | TBD | TBD |
-| Unresolvable | TBD | TBD |
+| Auto-resolved | 11 | Rs 1,13,681.78 |
+| Escalated for review | 0 | Rs 0.00 |
+| Unresolvable | 1 | Rs 10,882.80 |
 
-The unresolvable list is not a failure to hide. A settlement whose gap
-is partly explained by a refund and partly by a deduction with no
-record in the merchant's data cannot be attributed with confidence, and
-the system says so rather than guessing.
+### How to read these numbers
+
+**Detection is exact.** Every planted exception was found and nothing
+else was flagged. This tests the reconciler, not the model.
+
+**Four of twelve resolved without a model call.** A single candidate
+matching the gap exactly, and a gap no refund can cover even summed, are
+arithmetic rather than judgment. The classifier is reserved for evidence
+that is genuinely ambiguous.
+
+**Nothing escalated, and that is a finding rather than a success.** Two
+settlements in this dataset contain both a chargeback and an old-cycle
+refund. The verdict schema was extended to hold a list of causes with an
+attributed amount each, and routing escalates any verdict covering less
+than 90% of the gap — a mechanism verified by test at 58% coverage and
+0.99 confidence.
+
+The model does not produce partial attributions. Across 8
+classifications it returned exactly one cause every time and attributed
+the full gap to it, including on the settlement ground truth records as
+two chargebacks plus a refund. Coverage is therefore always 100% and the
+gate never fires. Permitting an answer is not the same as eliciting it.
+Recorded as F-12.
 
 ## Architecture
 
@@ -102,21 +130,26 @@ the system says so rather than guessing.
     evidence.py     gather candidates, compute amount matches
           |
           v
-    classifier.py   LLM: name the cause          <-- only LLM step
+    pipeline.py     deterministic resolution attempted first
           |
           v
-    pipeline.py     confidence gate, audit record
+    classifier.py   LLM: attribute the gap     <-- only LLM step
+          |
+          v
+    pipeline.py     coverage and confidence gate, audit record
           |
           v
     evaluate.py     score against ground truth
 
-Every stage except `classifier.py` is deterministic.
+Every stage except `classifier.py` is deterministic. Full design notes,
+trade-offs and limitations are in
+[docs/architecture.md](docs/architecture.md).
 
 ### What is deliberately not used
 
 **LangGraph or an agent runtime.** The control flow is static — every
-settlement takes the same path, and the only branch is a numeric
-threshold. A graph runtime would add a dependency and a layer of
+settlement takes the same path, and the only branches are numeric
+thresholds. A graph runtime would add a dependency and a layer of
 indirection without enabling anything.
 
 **A vector database.** There is no retrieval problem here. Candidate
@@ -131,84 +164,46 @@ dashboard.
 **Python does all arithmetic and all matching.** Grouping payments into
 settlement batches, computing fees and GST, summing, comparing against
 the bank credit, searching candidate refunds for exact and pairwise
-amount matches. All of it is exact, free, and identical on every run.
+amount matches, and computing how much of a gap survives them. All of it
+is exact, free, and identical on every run.
 
-**The model does one thing: name the cause of a gap it is handed.** It
-receives the computed gap, the candidate refunds, and the amount-match
-findings as facts. It never adds anything up.
+**The model does one thing: attribute a gap it is handed.** It receives
+the computed gap, the candidate refunds, and the amount-match findings
+as facts. It never adds anything up.
 
     The model classifies. It never calculates.
 
-**Unambiguous cases never reach the model.** A single candidate refund
-matching the gap exactly is resolved in code at confidence 1.0. Calling
-a model to confirm what arithmetic has already proven is waste.
+**Unambiguous cases never reach the model.** A single candidate matching
+the gap exactly resolves in code at confidence 1.0. So does a gap no
+refund can cover even summed — that is a chargeback by definition.
+Calling a model to confirm what arithmetic has already proven is waste.
 
 **The model's judgment is required where matching fails.** A settlement
-whose gap no refund explains, alone or in combination, has money in it
-with no record in the merchant's data. Deciding whether that is a
-chargeback, a partially-matched old-cycle refund, or something
-unmodelled is a judgment over incomplete evidence — which is what a
-language model is for and what a rule cannot do.
+whose gap is partly explained by a refund, with a remainder that has no
+record anywhere, cannot be attributed by any rule. Deciding what that
+remainder is — a chargeback, a partially matched refund, or something
+unmodelled — is judgment over incomplete evidence.
 
-**Low confidence escalates rather than guesses.** Verdicts below the
-0.85 threshold route to human review; a verdict of `unknown` routes to
-the unresolvable list. In a finance system a silent wrong answer costs
-far more than an unnecessary review.
+**Low confidence or partial coverage escalates rather than guessing.** A
+verdict holds a list of causes, each with the amount of the gap it
+accounts for. Routing escalates anything covering less than 90% of the
+gap or falling below 0.85 confidence; a verdict with no attributable
+cause goes to the unresolvable list. In a finance system a silent wrong
+answer costs far more than an unnecessary review.
 
-### Tests
+See the results section for what happened when this was measured — the
+mechanism works and the model does not currently use it.
 
-    pytest
+## Development record
 
-Nine tests covering the deterministic core: fee and GST arithmetic,
-T+2 batch selection, exclusion of failed payments, and the refund
-justification rule. No API calls required — the components that handle
-money are verifiable without a model being available.
+Twelve runtime failures were logged while building this, including the
+wrong theories pursued along the way:
+[FAILURES.md](FAILURES.md).
 
-## Results
-
-Measured on a 30-day synthetic dataset: 1,380 payments, 67 refunds,
-6 chargebacks, 30 settlements. Ground truth is written by the generator
-as each problem is planted, and read only by the evaluator.
-
-| Metric | Value |
-|---|---|
-| Settlements processed | 30 |
-| Reconciled cleanly | 18 (60%) |
-| Exceptions raised | 12 |
-| Exceptions in ground truth | 12 |
-| Detection precision | 1.00 |
-| Detection recall | 1.00 |
-| Cause classified correctly | 12 / 12 |
-| Evidence cited correctly | 12 / 12 |
-| Model calls | 8 of 12 exceptions |
-
-### Exception routing
-
-| Route | Count | Value |
-|---|---|---|
-| Auto-resolved | 12 | Rs 1,24,564.58 |
-| Escalated for review | 0 | Rs 0.00 |
-| Unresolvable | 0 | Rs 0.00 |
-
-### How to read these numbers
-
-**Detection is exact.** Every planted exception was found and nothing
-else was flagged. This tests the reconciler, not the model.
-
-**Two of the twelve are scored generously.** 29 and 30 July each contain
-both a chargeback and an old-cycle refund. The verdict schema holds one
-`cause`, so a gap that is partly one and partly the other cannot be
-expressed. The evaluator accepts either as correct. The model returned
-0.85 on both and cited no evidence — earlier runs returned 0.2 on the
-same settlements, so a prompt change made it more confident on precisely
-the cases where it should be least confident. This is recorded as F-12.
-
-**Nothing escalated.** The confidence gate exists to catch overconfident
-verdicts and caught none, including the two above. A threshold cannot
-compensate for a schema with no way to say "partly". The fix is a list
-of causes with an attributed amount each, so confidence describes how
-much of the gap is accounted for rather than how sure the model is about
-one label.
-
-**Four of twelve resolved without a model call.** Single exact matches
-and gaps no refund can cover are arithmetic, not judgment.
+The most instructive: the classifier would not emit a `chargeback` label
+across four prompt revisions. The model stated the reason in its own
+first response — that the schema permitted only three causes — and it was
+read as hedging. `models.py` contained three `class Cause` definitions
+accumulated by pasting rather than editing, and `ExceptionVerdict` had
+captured an earlier three-value one. Roughly four hours on a prompt
+problem that was a file hygiene problem.

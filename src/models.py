@@ -87,13 +87,41 @@ class Cause(str, Enum):
     UNKNOWN = "unknown"
 
 
-class ExceptionVerdict(BaseModel):
+class CauseAttribution(BaseModel):
+    """One cause, and how much of the gap it accounts for."""
+
     cause: Cause
+    amount_paise: int
+    evidence_refund_ids: list[str] = []
+
+
+class ExceptionVerdict(BaseModel):
+    causes: list[CauseAttribution]
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
-    evidence_refund_ids: list[str] = []
     suggested_action: str
 
+    @property
+    def primary_cause(self) -> Cause:
+        """The cause accounting for the largest share of the gap."""
+        if not self.causes:
+            return Cause.UNKNOWN
+        return max(self.causes, key=lambda c: c.amount_paise).cause
+
+    @property
+    def attributed_paise(self) -> int:
+        """Only causes that actually explain something count. An unknown
+        remainder is the opposite of an explanation."""
+        return sum(
+            c.amount_paise for c in self.causes if c.cause != Cause.UNKNOWN
+        )
+    
+    @property
+    def all_evidence_ids(self) -> list[str]:
+        ids = []
+        for c in self.causes:
+            ids.extend(c.evidence_refund_ids)
+        return ids
 
 # Routing
 
@@ -110,6 +138,8 @@ class ExceptionRecord(BaseModel):
     gap_paise: int
     route: Route
     cause: Cause
+    causes: list[CauseAttribution] = []
+    coverage: float = 0.0
     confidence: float
     evidence_refund_ids: list[str]
     reasoning: str

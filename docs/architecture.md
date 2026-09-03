@@ -132,11 +132,15 @@ load.
 
 ## Known limitations
 
-**A verdict holds one cause.** A settlement containing both a chargeback
-and an old-cycle refund has no representable answer — the model names
-one and reports high confidence in it. Two of twelve exceptions in the
-current dataset are of this shape. The fix is a list of causes with an
-attributed amount each; see F-12.
+**The model does not produce partial attributions.** The verdict schema
+holds a list of causes with an attributed amount each, and routing
+escalates anything covering less than 90% of the gap. The mechanism is
+tested and works. But across 8 classifications the model returned a
+single cause every time, attributing the full gap to it — including on
+a settlement that ground truth records as two chargebacks plus a refund.
+Coverage is therefore always 100% and the gate never fires. Permitting
+an answer is not the same as eliciting it; the prompt needs to make
+partial attribution the expected output. See F-12.
 
 **Old-cycle refunds are full-value.** The gap therefore matches a
 historical refund exactly, or matches a pair. Real old-cycle refunds are
