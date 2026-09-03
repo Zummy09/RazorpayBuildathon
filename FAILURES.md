@@ -51,6 +51,32 @@ Filter each batch to `status == CAPTURED` before summing.
 
 ---
 
+## F-02 — Set membership failed on Pydantic objects
+
+**Symptom**
+`TypeError: unhashable type: 'Payment'` when excluding already-refunded
+payments from the normal refund pool.
+
+**Root cause**
+Pydantic models are mutable by default, so they cannot be hashed and
+cannot go in a set. The exclusion check tried to build a set of Payment
+objects directly.
+
+**What I tried**
+Read the error as a Pydantic problem and looked for a config option to
+make the model hashable. Wrong direction — the fix was to stop putting
+objects in the set at all.
+
+**Fix**
+Compare on `payment_id` instead. Build a set of ID strings once, outside
+the comprehension.
+
+**Cost**
+~10 min. Also fixed a performance bug — the set was being rebuilt on
+every iteration of a 1,279-item loop.
+
+---
+
 ## F-03 — Reconciler matched 30/30 by replaying the generator's own logic
 
 **Symptom**
@@ -76,7 +102,7 @@ subtracts a refund when the original payment is in that settlement's
 batch. Old-cycle refunds now produce genuine unexplained gaps.
 
 **Cost**
-~2 hour. This was a design error, not a coding error — the reconciler
+~2 hours. This was a design error, not a coding error — the reconciler
 had access to information a real merchant would never have.
 
 ## F-04 — Normal refunds misclassified as exceptions
@@ -113,6 +139,7 @@ until metrics exist to tune the window against.
 ~45 min. The oversized gaps were the tell — a gap can never exceed the
 largest single payment unless multiple items are being missed.
 
+---
 
 ## F-05 — Model endpoint retired mid-build
 
@@ -171,34 +198,9 @@ consumes data as an external input rather than producing it.
 ~20 min. The tell was 20 exceptions, the same count as the F-04
 symptom — the old data still carried the old bug.
 
-## F-07 — Model identified chargebacks but refused to label them
-
-**Symptom**
-Three settlements returned cause=unknown while the reasoning field
-explicitly said "indicates a customer bank chargeback." Confidence rose
-from 0.1-0.3 to 0.85 after a prompt revision, but the cause field did
-not change.
-
-**Root cause**
-The prompt defined chargebacks as identifiable by the absence of refund
-evidence, while also instructing the model to return unknown when it
-could not confirm a cause from the data. For a chargeback these are the
-same condition -- unconfirmability from merchant records is the
-defining feature, not a reason to abstain.
-
-**Fix**
-Stated explicitly that unconfirmability is not grounds for unknown, and
-reordered the cause list so chargeback is read last.
-
-**What this showed**
-The reasoning field was worth more than the label. Without it, this
-would have looked like model uncertainty rather than a contradiction in
-the prompt. Capturing free-text reasoning alongside a structured verdict
-is what made it diagnosable.
-
 ---
 
-## F-07 — Model would not emit a label the prompt had defined
+## F-07 — Contradicting rule cancelled a prompt definition
 
 **Symptom**
 Chargeback settlements returned `cause=unknown` while the reasoning
