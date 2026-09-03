@@ -21,6 +21,8 @@ Typos and environment setup are not failures.
 | F-08 | Duplicate class definitions shadowing an enum | Code hygiene |
 | F-09 | Encoding crash, then a poisoned cache | Platform |
 | F-10 | Error handling masked a code bug as an API failure | Design |
+| F-11 | Documented deterministic path was never implemented | Testing |
+| F-12 | Overconfidence on multi-cause gaps | Calibration |
 
 
 ---
@@ -374,3 +376,43 @@ instead-of-edit mistake caused F-08.
 **Cost**
 ~20 min to fix. Found by a test written two hours after the bug was
 introduced.
+
+---
+
+## F-12 — Overconfidence on multi-cause gaps
+
+**Symptom**
+Two settlements containing both a chargeback and an old-cycle refund
+were auto-resolved at 0.85 confidence, above the escalation threshold,
+with no evidence cited. Earlier runs returned 0.2 on the same two
+settlements.
+
+**Root cause**
+Prompt revisions made to fix chargeback labelling (F-07) also raised
+confidence on gaps with more than one cause. The verdict schema holds a
+single `cause` field, so a gap that is partly a refund and partly a
+chargeback cannot be represented — the model picks one and reports
+confidence in that pick rather than in how much of the gap it has
+actually accounted for.
+
+**How it was found**
+The evaluator initially scored these as wrong cause. Investigating
+showed ground truth had multiple rows for those dates and the comparison
+was taking the first arbitrarily. Fixing the scoring revealed the real
+problem was not the label but the confidence attached to it.
+
+**What this showed**
+The confidence gate exists to catch exactly this and caught nothing —
+12 of 12 exceptions auto-resolved, 0 escalated. A threshold cannot
+compensate for a schema that has no way to express a partial
+explanation.
+
+**What I would change**
+Replace the single `cause` field with a list of causes, each with an
+attributed amount. Confidence would then describe how much of the gap
+is accounted for rather than how certain the model is about one label.
+A gap only 60% explained would fall below the threshold on its own.
+
+**Status**
+Not fixed. Recorded as a known limitation in the architecture document
+and reflected in the results section of the README.

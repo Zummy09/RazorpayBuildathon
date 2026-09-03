@@ -36,19 +36,38 @@ def evaluate(results, records, truth: dict) -> dict:
     correct_evidence = 0
     scored = 0
 
+    multi_cause_dates = []
+
     for rec in records:
         date_key = str(rec.settled_on)
         if date_key not in truth:
             continue
 
         scored += 1
-        expected_cause = truth[date_key][0]["cause"]
-        expected_refunds = {row["caused_by"] for row in truth[date_key]}
+        rows = truth[date_key]
+        expected_causes = {row["cause"] for row in rows}
 
-        if rec.cause.value == expected_cause:
+        if len(expected_causes) > 1:
+            multi_cause_dates.append(date_key)
+
+        # a gap may contain more than one cause; the verdict schema holds
+        # only one, so any real cause counts as correct
+        if rec.cause.value in expected_causes:
             correct_cause += 1
-        if set(rec.evidence_refund_ids) == expected_refunds:
-            correct_evidence += 1
+
+        # chargebacks are never written to the merchant's data, so the
+        # system cannot cite an id for them. citing nothing is correct.
+        if rec.cause.value == "chargeback":
+            if not rec.evidence_refund_ids:
+                correct_evidence += 1
+        else:
+            expected_refunds = {
+                row["caused_by"]
+                for row in rows
+                if not row["caused_by"].startswith("CBK_")
+            }
+            if set(rec.evidence_refund_ids) == expected_refunds:
+                correct_evidence += 1
 
     by_route = defaultdict(lambda: {"count": 0, "paise": 0})
     for rec in records:
@@ -73,4 +92,5 @@ def evaluate(results, records, truth: dict) -> dict:
         "correct_evidence": correct_evidence,
         "by_route": dict(by_route),
         "llm_calls": sum(1 for r in records if r.resolved_by == "llm"),
+        "multi_cause_dates": multi_cause_dates,
     }

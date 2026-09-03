@@ -132,7 +132,11 @@ load.
 
 ## Known limitations
 
-These are deliberate boundaries, not oversights.
+**A verdict holds one cause.** A settlement containing both a chargeback
+and an old-cycle refund has no representable answer — the model names
+one and reports high confidence in it. Two of twelve exceptions in the
+current dataset are of this shape. The fix is a list of causes with an
+attributed amount each; see F-12.
 
 **Old-cycle refunds are full-value.** The gap therefore matches a
 historical refund exactly, or matches a pair. Real old-cycle refunds are

@@ -163,3 +163,52 @@ Nine tests covering the deterministic core: fee and GST arithmetic,
 T+2 batch selection, exclusion of failed payments, and the refund
 justification rule. No API calls required — the components that handle
 money are verifiable without a model being available.
+
+## Results
+
+Measured on a 30-day synthetic dataset: 1,380 payments, 67 refunds,
+6 chargebacks, 30 settlements. Ground truth is written by the generator
+as each problem is planted, and read only by the evaluator.
+
+| Metric | Value |
+|---|---|
+| Settlements processed | 30 |
+| Reconciled cleanly | 18 (60%) |
+| Exceptions raised | 12 |
+| Exceptions in ground truth | 12 |
+| Detection precision | 1.00 |
+| Detection recall | 1.00 |
+| Cause classified correctly | 12 / 12 |
+| Evidence cited correctly | 12 / 12 |
+| Model calls | 8 of 12 exceptions |
+
+### Exception routing
+
+| Route | Count | Value |
+|---|---|---|
+| Auto-resolved | 12 | Rs 1,24,564.58 |
+| Escalated for review | 0 | Rs 0.00 |
+| Unresolvable | 0 | Rs 0.00 |
+
+### How to read these numbers
+
+**Detection is exact.** Every planted exception was found and nothing
+else was flagged. This tests the reconciler, not the model.
+
+**Two of the twelve are scored generously.** 29 and 30 July each contain
+both a chargeback and an old-cycle refund. The verdict schema holds one
+`cause`, so a gap that is partly one and partly the other cannot be
+expressed. The evaluator accepts either as correct. The model returned
+0.85 on both and cited no evidence — earlier runs returned 0.2 on the
+same settlements, so a prompt change made it more confident on precisely
+the cases where it should be least confident. This is recorded as F-12.
+
+**Nothing escalated.** The confidence gate exists to catch overconfident
+verdicts and caught none, including the two above. A threshold cannot
+compensate for a schema with no way to say "partly". The fix is a list
+of causes with an attributed amount each, so confidence describes how
+much of the gap is accounted for rather than how sure the model is about
+one label.
+
+**Four of twelve resolved without a model call.** Single exact matches
+and gaps no refund can cover are arithmetic, not judgment.
