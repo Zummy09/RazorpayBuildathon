@@ -154,3 +154,12 @@ language model is for and what a rule cannot do.
 0.85 threshold route to human review; a verdict of `unknown` routes to
 the unresolvable list. In a finance system a silent wrong answer costs
 far more than an unnecessary review.
+
+### Tests
+
+    pytest
+
+Nine tests covering the deterministic core: fee and GST arithmetic,
+T+2 batch selection, exclusion of failed payments, and the refund
+justification rule. No API calls required — the components that handle
+money are verifiable without a model being available.

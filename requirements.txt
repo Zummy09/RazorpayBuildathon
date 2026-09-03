@@ -1,3 +1,4 @@
 pydantic>=2.0
 python-dotenv
 google-genai
+pytest
